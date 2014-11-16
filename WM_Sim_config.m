@@ -130,10 +130,10 @@ WM.Sim.alg_spreading_sequence                = 'swb2712';
 
   load_system('WM_Sim');
 if strcmp(fec,'on')
-    WM.Sim.FEC.delay = 0;
-WM.Sim.FEC_decod.delay = 0;
+    WM.Sim.FEC.delay = 5;%WM.Sim.Message_length;
+WM.Sim.FEC_decod.delay = 5;%WM.Sim.Codeword_length;
     %fec encoder
-    subsystem = 'WM_Sim/FEC';
+    subsystem = 'WM_Sim/FEC/Block';
    bpath = find_system(subsystem,'Name','BCH Encoder');
    iport_h = find_system(subsystem,'FindAll','on','type','block','Name','uncoded_i');
    oport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_o');
@@ -163,7 +163,7 @@ WM.Sim.FEC_decod.delay = 0;
    
     %fec decoder
     
-    subsystem = 'WM_Sim/FEC_decod';
+    subsystem = 'WM_Sim/FEC_decod/Block';
    bpath = find_system(subsystem,'Name','BCH Decoder');
    iport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_i');
    oport_h = find_system(subsystem,'FindAll','on','type','block','Name','decoded_o');
@@ -192,11 +192,11 @@ WM.Sim.FEC_decod.delay = 0;
    add_line(subsystem,'BCH Decoder/1','decoded_o/1','autorouting','on');
     
 elseif strcmp(fec,'off')
-    WM.Sim.FEC.delay = 0;
-WM.Sim.FEC_decod.delay = 0;
+    WM.Sim.FEC.delay = WM.Sim.Message_length;
+WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length;
     %%% fec encoder
    bpath = find_system('WM_Sim','Name','BCH Encoder');
-   subsystem = 'WM_Sim/FEC';
+   subsystem = 'WM_Sim/FEC/Block';
    iport_h = find_system(subsystem,'FindAll','on','type','block','Name','uncoded_i');
    oport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_o');
   
@@ -223,7 +223,7 @@ WM.Sim.FEC_decod.delay = 0;
    
     %%% fec decoder
    bpath = find_system('WM_Sim','Name','BCH Decoder');
-    subsystem = 'WM_Sim/FEC_decod';
+    subsystem = 'WM_Sim/FEC_decod/Block';
    iport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_i');
    oport_h = find_system(subsystem,'FindAll','on','type','block','Name','decoded_o');
   
@@ -388,11 +388,11 @@ end
 WM.Sim.Encoder.TxFilter.desired_latency = 3*WM.Sim.Encoder.SF;
 if mod(WM.Sim.Encoder.TxFilter.desired_latency,WM.Sim.Encoder.SF)~=0
     
-    error(' Tx-Rx filter latency must be multiple of SF for easy delay compensation for BER estimate');
+    error(' Tx-Rx filter latency %f must be multiple of SF for easy delay compensation for BER estimate',WM.Sim.Encoder.TxFilter.desired_latency);
 end
 if mod(WM.Sim.Encoder.TxFilter.order,2)==1 
     
-   warning('Filter order odd , ensure delay compensation is correct');
+   warning('Filter order %f odd , ensure delay compensation is correct',WM.Sim.Encoder.TxFilter.order);
 end
 if mod(WM.Sim.Encoder.TxFilter.order,WM.Sim.Encoder.Oversampling_factor*2)~=0
     
@@ -556,10 +556,17 @@ else
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%
+tx_filt_latency = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF/WM.Sim.FEC_ratio;
+rx_filt_latency = tx_filt_latency;
+if ( mod(tx_filt_latency,1) ~=0)
+    
+   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',tx_filt_latency);
+end
+
 if WM.Sim.Frame_len==1
-WM.Sim.Tx_delay_eq = 1+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
+WM.Sim.Tx_delay_eq = 1+tx_filt_latency+rx_filt_latency+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
 else
-  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
+  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+tx_filt_latency+rx_filt_latency+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
        
 end
 
