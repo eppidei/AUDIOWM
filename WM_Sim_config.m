@@ -1,5 +1,5 @@
 function WM=WM_Sim_config(Time_length,Approx_char_rate,Tx_approx_BW,Carrier_Freq,hopping_approx_frequency,...
-                  hopping,Frame_len,suppression_filter,supp_filt_order,Eb_N0_dB,Jammer_type,fec,fec_ratio)
+                  hopping,Frame_len,suppression_filter,supp_filt_order,Eb_N0_dB,Jammer_type,fec,fec_k,fec_n)
 
 addpath ./functions
 
@@ -10,7 +10,8 @@ WM.Sim.Frame_len    = Frame_len;%WM.Sim.Encoder.SF;
 WM.Sim.Fs_audio   = 44100;
 WM.Sim.Fs_audio_frame_based =WM.Sim.Fs_audio/WM.Sim.Frame_len; 
 WM.Sim.Channel.BW          = WM.Sim.Fs_audio/2;
-WM.Sim.Message_length      = WM.Sim.Frame_len;
+WM.Sim.Message_length      =fec_k;
+fec_ratio=fec_k/fec_n;
 if strcmp(fec,'on')
     WM.Sim.FEC_ratio       = fec_ratio;
     
@@ -19,7 +20,7 @@ elseif strcmp(fec,'off')
 else
     error('valid fec option is on or off');
 end
-WM.Sim.Codeword_length      = WM.Sim.Message_length/fec_ratio;
+WM.Sim.Codeword_length      = (fec_n);
 %%%%%% SIMULATION PARAMS
 
 WM.Sim.Time_length =Time_length;
@@ -68,7 +69,7 @@ WM.Sim.Encoder.Tx_BW                      = WM.Sim.Channel.BW/WM.Sim.Encoder.Ove
 WM.Sim.Encoder.Tx_Rate                      = (2*WM.Sim.Encoder.Tx_BW);
 WM.Sim.Encoder.SF                         = round(WM.Sim.Encoder.Tx_Rate/(WM.Sim.Encoder.Source_approx_Rate));
 % WM.Sim.Frame_len                            = Frame_len;%WM.Sim.Encoder.SF;
-WM.Sim.Encoder.Source_Rate                = WM.Sim.Encoder.Tx_Rate/WM.Sim.Encoder.SF;
+WM.Sim.Encoder.Source_Rate                = WM.Sim.Encoder.Tx_Rate/WM.Sim.Encoder.SF*WM.Sim.FEC_ratio;
 WM.Sim.Encoder.Char_Rate                = WM.Sim.Encoder.Source_Rate/8;
 WM.Sim.Encoder.Source_Ts   = 1/WM.Sim.Encoder.Source_Rate;
 WM.Sim.Encoder.Source_BW   = (WM.Sim.Encoder.Source_Rate)/2;
@@ -104,10 +105,10 @@ end
 %%%SAMPLE Times
 
 WM.Sim.SampleTimes.Tsource   = WM.Sim.Encoder.Source_Ts;
-WM.Sim.SampleTimes.Tspreader = WM.Sim.Encoder.Source_Ts/WM.Sim.Encoder.SF;
+WM.Sim.SampleTimes.Tspreader = WM.Sim.Encoder.Source_Ts/WM.Sim.Encoder.SF*WM.Sim.FEC_ratio;
 if WM.Sim.SampleTimes.Tspreader<(1/WM.Sim.Encoder.Tx_Rate)-1e-10 || WM.Sim.SampleTimes.Tspreader>(1/WM.Sim.Encoder.Tx_Rate)+1e-10
     
-    error('Sample time problem');
+    error('Sample time problem Spreader rate = %f Tx_rate = %f',1/WM.Sim.SampleTimes.Tspreader,WM.Sim.Encoder.Tx_Rate);
     
 end
 WM.Sim.SampleTimes.Tchannel = 1/WM.Sim.Fs_audio;
@@ -126,15 +127,73 @@ WM.Sim.alg_spreading_sequence                = 'swb2712';
 
 
 %%%%%%%FEC
+
   load_system('WM_Sim');
 if strcmp(fec,'on')
+    WM.Sim.FEC.delay = 0;
+WM.Sim.FEC_decod.delay = 0;
+    %fec encoder
+    subsystem = 'WM_Sim/FEC';
+   bpath = find_system(subsystem,'Name','BCH Encoder');
+   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','uncoded_i');
+   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_o');
+   if isempty(bpath)
+       bpath2=[subsystem,'/BCH Encoder'];
+   add_block('commblkcod2/BCH Encoder',bpath2,'N',num2str(WM.Sim.Codeword_length),'K',num2str(WM.Sim.Message_length));
+   else
+       str=sprintf('%s',bpath{1});
+       warning('block %s already present',str);
+   end
+   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
+    if isempty(line_h1)
+        warning('BCH Encoder input line has been already removed');
+   else
+       delete_line(line_h1);
+   end
    
- 
-   add_block('Communication System Toolbox/Error Detection and Correction/Block/BCH Encoder','WM_Sim/FEC');
-   add_line('WM_Sim/FEC','uncoded_i','BCH Encoder/1');
-   add_line('WM_Sim/FEC','BCH Encoder/1','coded_o');
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
+   if isempty(line_h2)
+        warning('BCH Encoder output line has been already removed');
+   else
+        delete_line(line_h2);
+   end
+   
+   add_line(subsystem,'uncoded_i/1','BCH Encoder/1');
+   add_line(subsystem,'BCH Encoder/1','coded_o/1');
+   
+    %fec decoder
+    
+    subsystem = 'WM_Sim/FEC_decod';
+   bpath = find_system(subsystem,'Name','BCH Decoder');
+   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_i');
+   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','decoded_o');
+   if isempty(bpath)
+       bpath2=[subsystem,'/BCH Decoder'];
+   add_block('commblkcod2/BCH Decoder',bpath2,'N',num2str(WM.Sim.Codeword_length),'K',num2str(WM.Sim.Message_length));
+   else
+       str=sprintf('%s',bpath{1});
+       warning('block %s already present',str);
+   end
+   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
+    if isempty(line_h1)
+        warning('BCH Decoder input line has been already removed');
+   else
+       delete_line(line_h1);
+   end
+   
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
+   if isempty(line_h2)
+        warning('BCH Decoder output line has been already removed');
+   else
+        delete_line(line_h2);
+   end
+   
+   add_line(subsystem,'coded_i/1','BCH Decoder/1','autorouting','on');
+   add_line(subsystem,'BCH Decoder/1','decoded_o/1','autorouting','on');
     
 elseif strcmp(fec,'off')
+    WM.Sim.FEC.delay = 0;
+WM.Sim.FEC_decod.delay = 0;
     %%% fec encoder
    bpath = find_system('WM_Sim','Name','BCH Encoder');
    subsystem = 'WM_Sim/FEC';
@@ -154,7 +213,7 @@ elseif strcmp(fec,'off')
        delete_line(line_h1);
    end
    
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',oport_h);
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
    if isempty(line_h2)
         warning('BCH Encoder output line has been already removed');
    else
@@ -181,14 +240,122 @@ elseif strcmp(fec,'off')
        delete_line(line_h1);
    end
    
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',oport_h);
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
    if isempty(line_h2)
         warning('BCH Encoder output line has been already removed');
    else
         delete_line(line_h2);
    end
-   add_line(subsystem,'coded_i/1','decoded_o/1');
+   add_line(subsystem,'coded_i/1','decoded_o/1','autorouting','on');
+else
+    
+    error('fec can be only on or off,actual is %s',fec);
+end
+
+
+%%%%BURG SUPP
+if strcmp(suppression_filter,'on')
    
+ 
+    subsystem = 'WM_Sim/RX_chain/Burg suppresion';
+   bpath = find_system(subsystem,'Name','Burg AR Estimator');
+   bpath2 = find_system(subsystem,'Name','Suppression Filter');
+   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','signal_i');
+   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','filterd_o');
+   burg_h= find_system(subsystem,'FindAll','on','type','block','Name','Burg AR Estimator');
+   
+   if isempty(bpath)
+       bpath2=[subsystem,'/Burg AR Estimator'];
+   add_block('dspparest3/Burg AR Estimator',bpath2,'ord',num2str(WM.Sim.SuppFilt.order),'fcn','A','inheritOrder','off');
+   else
+       str=sprintf('%s',bpath{1});
+       warning('block %s already present',str);
+   end
+   
+   if isempty(bpath2)
+       bpath2=[subsystem,'/Suppression Filter'];
+   add_block('Simulink/Discrete/Discrete Filter',bpath2,'FilterStructure','Direct Form II Transposed','Denominator','[1]','NumeratorSource','Input port','InitialStates','0','ExternalReset','None','InputProcessing','Columns as channels (frame based)','SampleTime','-1','a0EqualsOne','on');
+   else
+       str=sprintf('%s',bpath2{1});
+       warning('block %s already present',str);
+   end
+   
+   
+   
+   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
+    if isempty(line_h1)
+        warning('Burg input line has been already removed');
+   else
+       delete_line(line_h1);
+   end
+   
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
+   if isempty(line_h2)
+        warning('Burg output line has been already removed');
+   else
+        delete_line(line_h2);
+   end
+   
+    line_h3 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',burg_h);
+   if isempty(line_h3)
+        warning('Burg internal line has been already removed');
+   else
+        delete_line(line_h3);
+   end
+   
+   add_line(subsystem,'signal_i/1','Burg AR Estimator/1','autorouting','on');
+   add_line(subsystem,'signal_i/1','Suppression Filter/1','autorouting','on');
+   add_line(subsystem,'Burg AR Estimator/1','Suppression Filter/2','autorouting','on');
+    add_line(subsystem,'Suppression Filter/1','filterd_o/1','autorouting','on');
+   
+elseif strcmp(suppression_filter,'off')   
+    
+bpath = find_system('WM_Sim','Name','Burg AR Estimator');
+bpath2 = find_system('WM_Sim','Name','Suppression Filter');
+
+   subsystem = 'WM_Sim/RX_chain/Burg suppresion';
+   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','signal_i');
+   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','filterd_o');
+   burg_h= find_system(subsystem,'FindAll','on','type','block','Name','Burg AR Estimator');
+  line_h3 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',burg_h);
+   if isempty(bpath)
+      warning('Burg AR Estimator has been already removed');
+   else
+      delete_block(bpath);
+   end
+   
+   if isempty(bpath2)
+      warning('Suppression Filter has been already removed');
+   else
+      delete_block(bpath2);
+   end
+   
+   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
+   if isempty(line_h1)
+        warning('BCH Encoder input line has been already removed');
+   else
+       delete_line(line_h1);
+   end
+   
+   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
+   if isempty(line_h2)
+        warning('BCH Encoder output line has been already removed');
+   else
+        delete_line(line_h2);
+   end
+   
+    
+   if isempty(line_h3)
+        warning('Burg internal line has been already removed');
+   else
+        delete_line(line_h3);
+   end
+   
+   add_line(subsystem,'signal_i/1','filterd_o/1','autorouting','on');
+else
+    
+    error('suppressio filter can be only on or off,actual is %s',suppression_filter);
+    
 end
 
 close_system('WM_Sim',1);
@@ -275,7 +442,7 @@ WM.Sim.Channel.AWGN_Custom.seed_noise_imag               = 22;
 
 WM.Sim.Channel.Pb_BPSK_AWGN             = theoretic_BPSK((WM.Sim.Channel.Eb_N0_dB));
 if WM.Sim.Frame_len>1
-WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency+WM.Sim.Frame_len;%WM.Sim.Encoder.TxFilter.GroupDelay;
+WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency+WM.Sim.Frame_len/ WM.Sim.FEC_ratio;%WM.Sim.Encoder.TxFilter.GroupDelay;
 else
    WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency;
 end
@@ -390,9 +557,9 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 if WM.Sim.Frame_len==1
-WM.Sim.Tx_delay_eq = 1+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
+WM.Sim.Tx_delay_eq = 1+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
 else
-  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
+  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+2*WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
        
 end
 
