@@ -105,6 +105,7 @@ end
 %%%SAMPLE Times
 
 WM.Sim.SampleTimes.Tsource   = WM.Sim.Encoder.Source_Ts;
+WM.Sim.SampleTimes.Tcoded   = WM.Sim.Encoder.Source_Ts*WM.Sim.FEC_ratio;
 WM.Sim.SampleTimes.Tspreader = WM.Sim.Encoder.Source_Ts/WM.Sim.Encoder.SF*WM.Sim.FEC_ratio;
 if WM.Sim.SampleTimes.Tspreader<(1/WM.Sim.Encoder.Tx_Rate)-1e-10 || WM.Sim.SampleTimes.Tspreader>(1/WM.Sim.Encoder.Tx_Rate)+1e-10
     
@@ -130,8 +131,8 @@ WM.Sim.alg_spreading_sequence                = 'swb2712';
 
   load_system('WM_Sim');
 if strcmp(fec,'on')
-    WM.Sim.FEC.delay = 5;%WM.Sim.Message_length;
-WM.Sim.FEC_decod.delay = 5;%WM.Sim.Codeword_length;
+    WM.Sim.FEC.delay =WM.Sim.Message_length;
+WM.Sim.FEC_decod.delay = WM.Sim.Message_length;
     %fec encoder
     subsystem = 'WM_Sim/FEC/Block';
    bpath = find_system(subsystem,'Name','BCH Encoder');
@@ -442,7 +443,7 @@ WM.Sim.Channel.AWGN_Custom.seed_noise_imag               = 22;
 
 WM.Sim.Channel.Pb_BPSK_AWGN             = theoretic_BPSK((WM.Sim.Channel.Eb_N0_dB));
 if WM.Sim.Frame_len>1
-WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency+WM.Sim.Frame_len/ WM.Sim.FEC_ratio;%WM.Sim.Encoder.TxFilter.GroupDelay;
+WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency+WM.Sim.Frame_len;%WM.Sim.Encoder.TxFilter.GroupDelay;
 else
    WM.Sim.Channel.Code_delay = 2*WM.Sim.Encoder.TxFilter.desired_latency;
 end
@@ -556,21 +557,33 @@ else
 end
 
 %%%%%%%%%%%%%%%%%%%%%%%%
-tx_filt_latency = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF/WM.Sim.FEC_ratio;
-rx_filt_latency = tx_filt_latency;
-if ( mod(tx_filt_latency,1) ~=0)
-    
-   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',tx_filt_latency);
-end
+
+%coded rate latencies
+tx_filt_latency_coderate = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;
+rx_filt_latency_coderate = tx_filt_latency_coderate;
+addictional_latency_coderate = 1;
+decoder_codeword_alignment_latency_coderate = WM.Sim.Codeword_length-mod(tx_filt_latency_coderate+rx_filt_latency_coderate+addictional_latency_coderate,WM.Sim.Codeword_length);
+WM.Sim.decoder_data_align = decoder_codeword_alignment_latency_coderate;
+
+%source rate latencies
+% tx_filt_latency_sourcerate = tx_filt_latency_coderate/WM.Sim.FEC_ratio;
+% rx_filt_latency_sourcerate = rx_filt_latency_coderate/WM.Sim.FEC_ratio;
+% addictional_latency_sourcerate = 1;%addictional_latency_coderate/WM.Sim.FEC_ratio;
+
+
 
 if WM.Sim.Frame_len==1
-WM.Sim.Tx_delay_eq = 1+tx_filt_latency+rx_filt_latency+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
+    WM.Sim.Tx_delay_eq_coderate = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
+WM.Sim.Tx_delay_eq = WM.Sim.Tx_delay_eq_coderate*WM.Sim.FEC_ratio+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
 else
-  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+tx_filt_latency+rx_filt_latency+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
+  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+tx_filt_latency_sourcerate+rx_filt_latency_sourcerate+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
        
 end
 
 
-
+if ( mod(WM.Sim.Tx_delay_eq,1) ~=0)
+    
+   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',tx_filt_latency);
+end
 
 
