@@ -1,4 +1,4 @@
-function WM=WM_Sim_config(Time_length,Approx_char_rate,Tx_approx_BW,Carrier_Freq,hopping_approx_frequency,...
+function WM=WM_Sim_config(Time_length,Approx_fec_byte_rate,Tx_approx_BW,Carrier_Freq,hopping_approx_frequency,...
                   hopping,Frame_len,suppression_filter,supp_filt_order,Eb_N0_dB,Jammer_type,fec,fec_k,fec_n)
 
 addpath ./functions
@@ -33,8 +33,8 @@ WM.Sim.out_test_ext     = 'wav';
 
 
 %%%%%%%% USER primary PARAMS
-WM.Sim.Encoder.Source_approx_charRate      = Approx_char_rate;
-WM.Sim.Encoder.Source_approx_Rate          = WM.Sim.Encoder.Source_approx_charRate*8;
+WM.Sim.Encoder.FEC_approx_charRate      = Approx_fec_byte_rate;
+WM.Sim.Encoder.FEC_approx_Rate          = WM.Sim.Encoder.FEC_approx_charRate*8;
 WM.Sim.Encoder.Tx_max_BW                   = 11e3;
 WM.Sim.Encoder.Tx_approx_BW                = Tx_approx_BW;
 WM.Sim.Encoder.Carrier_Freq                = Carrier_Freq;
@@ -67,7 +67,7 @@ WM.Sim.Upconverter.hopping_frequency  =WM.Sim.Upconverter.hopping_approx_frequen
 WM.Sim.Encoder.Oversampling_factor        = round(WM.Sim.Channel.BW/WM.Sim.Encoder.Tx_approx_BW);
 WM.Sim.Encoder.Tx_BW                      = WM.Sim.Channel.BW/WM.Sim.Encoder.Oversampling_factor;
 WM.Sim.Encoder.Tx_Rate                      = (2*WM.Sim.Encoder.Tx_BW);
-WM.Sim.Encoder.SF                         = round(WM.Sim.Encoder.Tx_Rate/(WM.Sim.Encoder.Source_approx_Rate));
+WM.Sim.Encoder.SF                         = round(WM.Sim.Encoder.Tx_Rate/(WM.Sim.Encoder.FEC_approx_Rate));
 % WM.Sim.Frame_len                            = Frame_len;%WM.Sim.Encoder.SF;
 WM.Sim.Encoder.Source_Rate                = WM.Sim.Encoder.Tx_Rate/WM.Sim.Encoder.SF*WM.Sim.FEC_ratio;
 WM.Sim.Encoder.Char_Rate                = WM.Sim.Encoder.Source_Rate/8;
@@ -131,126 +131,64 @@ WM.Sim.alg_spreading_sequence                = 'swb2712';
 
   load_system('WM_Sim');
 if strcmp(fec,'on')
-    WM.Sim.FEC.delay =WM.Sim.Message_length;
-WM.Sim.FEC_decod.delay = WM.Sim.Message_length;
+   
     %fec encoder
+    type='add';
     subsystem = 'WM_Sim/FEC/Block';
-   bpath = find_system(subsystem,'Name','BCH Encoder');
-   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','uncoded_i');
-   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_o');
-   if isempty(bpath)
-       bpath2=[subsystem,'/BCH Encoder'];
-   add_block('commblkcod2/BCH Encoder',bpath2,'N',num2str(WM.Sim.Codeword_length),'K',num2str(WM.Sim.Message_length));
-   else
-       str=sprintf('%s',bpath{1});
-       warning('block %s already present',str);
-   end
-   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
-    if isempty(line_h1)
-        warning('BCH Encoder input line has been already removed');
-   else
-       delete_line(line_h1);
-   end
-   
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
-   if isempty(line_h2)
-        warning('BCH Encoder output line has been already removed');
-   else
-        delete_line(line_h2);
-   end
-   
-   add_line(subsystem,'uncoded_i/1','BCH Encoder/1');
-   add_line(subsystem,'BCH Encoder/1','coded_o/1');
+    block_name = 'BCH Encoder';
+    block_params.name_str={'N','K'};
+    block_params.val_str={num2str(WM.Sim.Codeword_length),num2str(WM.Sim.Message_length)};
+    block_params.n_params=length(block_params.name_str);
+    inport_name='uncoded_i';
+    oport_name='coded_o';
+    library_name='commblkcod2';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
+
    
     %fec decoder
-    
+     type='add';
     subsystem = 'WM_Sim/FEC_decod/Block';
-   bpath = find_system(subsystem,'Name','BCH Decoder');
-   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_i');
-   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','decoded_o');
-   if isempty(bpath)
-       bpath2=[subsystem,'/BCH Decoder'];
-   add_block('commblkcod2/BCH Decoder',bpath2,'N',num2str(WM.Sim.Codeword_length),'K',num2str(WM.Sim.Message_length));
-   else
-       str=sprintf('%s',bpath{1});
-       warning('block %s already present',str);
-   end
-   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
-    if isempty(line_h1)
-        warning('BCH Decoder input line has been already removed');
-   else
-       delete_line(line_h1);
-   end
-   
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
-   if isempty(line_h2)
-        warning('BCH Decoder output line has been already removed');
-   else
-        delete_line(line_h2);
-   end
-   
-   add_line(subsystem,'coded_i/1','BCH Decoder/1','autorouting','on');
-   add_line(subsystem,'BCH Decoder/1','decoded_o/1','autorouting','on');
+    block_name = 'BCH Decoder';
+    block_params.name_str={'N','K'};
+    block_params.val_str={num2str(WM.Sim.Codeword_length),num2str(WM.Sim.Message_length)};
+    block_params.n_params=length(block_params.name_str);
+    inport_name='coded_i';
+    oport_name='decoded_o';
+    library_name='commblkcod2';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
+
     
 elseif strcmp(fec,'off')
-    WM.Sim.FEC.delay = WM.Sim.Message_length;
-WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length;
+    
+ type='bypass';
+    subsystem = 'WM_Sim/FEC/Block';
+    block_name = 'BCH Encoder';
+    block_params.name_str={'N','K'};
+    block_params.val_str={num2str(WM.Sim.Codeword_length),num2str(WM.Sim.Message_length)};
+    block_params.n_params=length(block_params.name_str);
+    inport_name='uncoded_i';
+    oport_name='coded_o';
+    library_name='commblkcod2';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
     %%% fec encoder
-   bpath = find_system('WM_Sim','Name','BCH Encoder');
-   subsystem = 'WM_Sim/FEC/Block';
-   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','uncoded_i');
-   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_o');
-  
-   if isempty(bpath)
-      warning('BCH Encoder has been already removed');
-   else
-      delete_block(bpath);
-   end
-   
-   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
-   if isempty(line_h1)
-        warning('BCH Encoder input line has been already removed');
-   else
-       delete_line(line_h1);
-   end
-   
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
-   if isempty(line_h2)
-        warning('BCH Encoder output line has been already removed');
-   else
-        delete_line(line_h2);
-   end
-   add_line(subsystem,'uncoded_i/1','coded_o/1');
+
    
     %%% fec decoder
-   bpath = find_system('WM_Sim','Name','BCH Decoder');
+      type='bypass';
     subsystem = 'WM_Sim/FEC_decod/Block';
-   iport_h = find_system(subsystem,'FindAll','on','type','block','Name','coded_i');
-   oport_h = find_system(subsystem,'FindAll','on','type','block','Name','decoded_o');
-  
-   if isempty(bpath)
-      warning('BCH Decoder has been already removed');
-   else
-      delete_block(bpath);
-   end
-   
-   line_h1 = find_system(subsystem,'FindAll','on','type','line','SrcBlockHandle',iport_h);
-   if isempty(line_h1)
-        warning('BCH Encoder input line has been already removed');
-   else
-       delete_line(line_h1);
-   end
-   
-   line_h2 = find_system(subsystem,'FindAll','on','type','line','DstBlockHandle',oport_h);
-   if isempty(line_h2)
-        warning('BCH Encoder output line has been already removed');
-   else
-        delete_line(line_h2);
-   end
-   add_line(subsystem,'coded_i/1','decoded_o/1','autorouting','on');
-else
+    block_name = 'BCH Decoder';
+    block_params.name_str={'N','K'};
+    block_params.val_str={num2str(WM.Sim.Codeword_length),num2str(WM.Sim.Message_length)};
+    block_params.n_params=length(block_params.name_str);
+    inport_name='coded_i';
+    oport_name='decoded_o';
+    library_name='commblkcod2';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
     
-    error('fec can be only on or off,actual is %s',fec);
+
+ else
+     
+     error('fec can be only on or off,actual is %s',fec);
 end
 
 
@@ -359,7 +297,7 @@ else
     
 end
 
-close_system('WM_Sim',1);
+
 %%%%%SPREADER
 
 WM.Sim.Encoder.Spreader.seed_code_real    =   44;
@@ -558,32 +496,86 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 
-%coded rate latencies
-tx_filt_latency_coderate = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;
-rx_filt_latency_coderate = tx_filt_latency_coderate;
-addictional_latency_coderate = 1;
-decoder_codeword_alignment_latency_coderate = WM.Sim.Codeword_length-mod(tx_filt_latency_coderate+rx_filt_latency_coderate+addictional_latency_coderate,WM.Sim.Codeword_length);
-WM.Sim.decoder_data_align = decoder_codeword_alignment_latency_coderate;
 
 %source rate latencies
 % tx_filt_latency_sourcerate = tx_filt_latency_coderate/WM.Sim.FEC_ratio;
 % rx_filt_latency_sourcerate = rx_filt_latency_coderate/WM.Sim.FEC_ratio;
 % addictional_latency_sourcerate = 1;%addictional_latency_coderate/WM.Sim.FEC_ratio;
+if (strcmp(fec,'off'))
+    if (WM.Sim.Frame_len==1)
+            WM.Sim.FEC.delay = WM.Sim.Message_length;
+            WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length;
+    else
+        WM.Sim.FEC.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
+         WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length+WM.Sim.Frame_len;
+    end
+    
+elseif (strcmp(fec,'on'))
+    
+    if (WM.Sim.Frame_len==1)
+            WM.Sim.FEC.delay =WM.Sim.Message_length;
+                WM.Sim.FEC_decod.delay = WM.Sim.Message_length;
+    else
+        WM.Sim.FEC.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
+            WM.Sim.FEC_decod.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
+    end
+    
+end
 
+
+%coded rate latencies
+tx_filt_latency_coderate = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;
+rx_filt_latency_coderate = tx_filt_latency_coderate;
+addictional_latency_coderate = 1;
+decoder_codeword_alignment_latency_coderate = WM.Sim.FEC_decod.delay-mod(tx_filt_latency_coderate+rx_filt_latency_coderate+addictional_latency_coderate,WM.Sim.Codeword_length);
+WM.Sim.decoder_data_align = decoder_codeword_alignment_latency_coderate;
+
+if (WM.Sim.decoder_data_align==0)
+  type='bypass';
+    subsystem = 'WM_Sim/FEC_decod_delay_comp';
+    block_name = 'Delay';
+    block_params.name_str={};
+    block_params.val_str={};
+    block_params.n_params=0;
+    inport_name='inp_i';
+    oport_name='out_o';
+    library_name='Simulink/Discrete';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
+    
+else
+    
+    type='add';
+    subsystem = 'WM_Sim/FEC_decod_delay_comp';
+    block_name = 'Delay';
+    block_params.name_str={'DelayLength','InputProcessing'};
+    block_params.val_str={num2str(WM.Sim.decoder_data_align),'Columns as channels (frame based)'};
+    block_params.n_params=length(block_params.name_str);
+    inport_name='inp_i';
+    oport_name='out_o';
+    library_name='Simulink/Discrete';
+    add_or_bypass_SISO_block(type,subsystem,block_name,block_params,inport_name,oport_name,library_name);
+    
+end
 
 
 if WM.Sim.Frame_len==1
-    WM.Sim.Tx_delay_eq_coderate = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
-WM.Sim.Tx_delay_eq = WM.Sim.Tx_delay_eq_coderate*WM.Sim.FEC_ratio+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
+   WM.Sim.Tx_delay_eq_coderate = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
+    WM.Sim.Tx_delay_eq = WM.Sim.Tx_delay_eq_coderate*WM.Sim.FEC_ratio+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
 else
-  WM.Sim.Tx_delay_eq =1+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+WM.Sim.Frame_len+tx_filt_latency_sourcerate+rx_filt_latency_sourcerate+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
+    
+    delay_temp = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
+    WM.Sim.Tx_delay_eq_coderate =delay_temp +WM.Sim.Frame_len;
+    WM.Sim.Tx_delay_eq =(delay_temp*WM.Sim.FEC_ratio)+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
        
 end
 
 
 if ( mod(WM.Sim.Tx_delay_eq,1) ~=0)
     
-   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',tx_filt_latency);
+   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',WM.Sim.Tx_delay_eq);
 end
+
+
+close_system('WM_Sim',1);
 
 
