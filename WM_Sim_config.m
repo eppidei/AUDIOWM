@@ -102,7 +102,7 @@ end
     
 
 
-%%%SAMPLE Times
+%%%SAMPLE Times ... quelli evidenziati da simulink sono Frame times=sample_time*frame_len
 
 WM.Sim.SampleTimes.Tsource   = WM.Sim.Encoder.Source_Ts;
 WM.Sim.SampleTimes.Tcoded   = WM.Sim.Encoder.Source_Ts*WM.Sim.FEC_ratio;
@@ -496,41 +496,111 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 
+%%%Calcolo dei delay in tempo 
 
-%source rate latencies
-% tx_filt_latency_sourcerate = tx_filt_latency_coderate/WM.Sim.FEC_ratio;
-% rx_filt_latency_sourcerate = rx_filt_latency_coderate/WM.Sim.FEC_ratio;
-% addictional_latency_sourcerate = 1;%addictional_latency_coderate/WM.Sim.FEC_ratio;
-if (strcmp(fec,'off'))
-    if (WM.Sim.Frame_len==1)
-            WM.Sim.FEC.delay = WM.Sim.Message_length;
-            WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length;
-    else
-        WM.Sim.FEC.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
-         WM.Sim.FEC_decod.delay = WM.Sim.Codeword_length+WM.Sim.Frame_len;
-    end
-    
-elseif (strcmp(fec,'on'))
-    
-    if (WM.Sim.Frame_len==1)
-            WM.Sim.FEC.delay =WM.Sim.Message_length;
-                WM.Sim.FEC_decod.delay = WM.Sim.Message_length;
-    else
-        WM.Sim.FEC.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
-            WM.Sim.FEC_decod.delay = WM.Sim.Message_length+WM.Sim.Frame_len;
-    end
-    
+WM.Sim.FrameTimes.Tsource   = WM.Sim.Encoder.Source_Ts*WM.Sim.Frame_len;
+WM.Sim.FrameTimes.Tcoded   = WM.Sim.FrameTimes.Tsource*WM.Sim.FEC_ratio;
+WM.Sim.FrameTimes.Tspreader = WM.Sim.FrameTimes.Tcoded/WM.Sim.Encoder.SF;
+WM.Sim.FrameTimes.Tchannel = 1/WM.Sim.Fs_audio*WM.Sim.Frame_len;
+WM.Sim.FrameTimes.TFEC = WM.Sim.FrameTimes.Tsource*WM.Sim.Message_length/WM.Sim.Frame_len;
+WM.Sim.FrameTimes.TFEC_decod = WM.Sim.FrameTimes.Tcoded*WM.Sim.Codeword_length/WM.Sim.Frame_len;
+%%%%%%%%%%%Time delays%%%%%%%%%%%%%%
+%%%FEC coder
+if ( mod(WM.Sim.Frame_len,WM.Sim.Message_length)==0)
+    Fec_Timedelay_buf1 = 0;
+else
+    Fec_Timedelay_buf1 = WM.Sim.FrameTimes.TFEC;%0.798
 end
 
+    Fec_Timedelay_fec  = 0;
 
-%coded rate latencies
-tx_filt_latency_coderate = WM.Sim.Encoder.TxFilter.desired_latency/WM.Sim.Encoder.SF;
-rx_filt_latency_coderate = tx_filt_latency_coderate;
-addictional_latency_coderate = 1;
-decoder_codeword_alignment_latency_coderate = WM.Sim.FEC_decod.delay-mod(tx_filt_latency_coderate+rx_filt_latency_coderate+addictional_latency_coderate,WM.Sim.Codeword_length);
-WM.Sim.decoder_data_align = decoder_codeword_alignment_latency_coderate;
+if (mod(WM.Sim.Codeword_length,WM.Sim.Frame_len)==0)
+    FEc_Timedelay_buf2 = 0;
+else
+    FEc_Timedelay_buf2 = WM.Sim.FrameTimes.Tcoded;%0
+end
+WM.Sim.FEC.Time_delay = Fec_Timedelay_buf1+Fec_Timedelay_fec+FEc_Timedelay_buf2;
+%%%TX Chain
+TX_chain_Timedelay=WM.Sim.Encoder.TxFilter.desired_latency*WM.Sim.SampleTimes.Tspreader;
+WM.Sim.Tx_chain.Time_delay = TX_chain_Timedelay;
+%%%RX Chain
+RX_chain_Timedelay=TX_chain_Timedelay;
+WM.Sim.Rx_chain.Time_delay = RX_chain_Timedelay;
 
-if (WM.Sim.decoder_data_align==0)
+%FEC decoder
+if ( mod(WM.Sim.Frame_len,WM.Sim.Codeword_length)==0)
+    
+    Fecdecod_Timedelay_buf1=0;
+    
+else
+    Fecdecod_Timedelay_buf1 = WM.Sim.FrameTimes.TFEC_decod;%0.791
+end
+
+    Fecdecod_Timedelay_fecdecod  = 0;
+
+
+     if (mod(WM.Sim.Message_length,WM.Sim.Frame_len)==0)
+         
+         FEcdecod_Timedelay_buf2=0;
+     else
+        FEcdecod_Timedelay_buf2 = WM.Sim.FrameTimes.Tsource;
+     end
+
+WM.Sim.FEC_decod.Time_delay = Fecdecod_Timedelay_buf1+Fecdecod_Timedelay_fecdecod+FEcdecod_Timedelay_buf2;
+
+%Code align
+if (strcmp(fec,'on'))
+    if (WM.Sim.Frame_len==1)
+        Code_align_Timedelay = (WM.Sim.FrameTimes.TFEC_decod)-mod(FEc_Timedelay_buf2+WM.Sim.Tx_chain.Time_delay+WM.Sim.Rx_chain.Time_delay+Fecdecod_Timedelay_buf1+WM.Sim.SampleTimes.Tcoded,WM.Sim.FrameTimes.TFEC_decod);
+    else
+       
+            Code_align_Timedelay = (WM.Sim.FrameTimes.TFEC_decod)-mod(FEc_Timedelay_buf2+WM.Sim.Tx_chain.Time_delay+WM.Sim.Rx_chain.Time_delay+Fecdecod_Timedelay_buf1+WM.Sim.FrameTimes.Tcoded+WM.Sim.SampleTimes.Tcoded,WM.Sim.FrameTimes.TFEC_decod);
+        
+    end
+else
+    Code_align_Timedelay = 0;%(WM.Sim.FrameTimes.TFEC_decod)-mod(FEc_Timedelay_buf2+WM.Sim.Tx_chain.Time_delay+WM.Sim.Rx_chain.Time_delay+Fecdecod_Timedelay_buf1+WM.Sim.FrameTimes.Tcoded,WM.Sim.FrameTimes.TFEC_decod);
+end;
+WM.Sim.Fec_decod_delay_comp.Time_delay = Code_align_Timedelay;
+
+
+
+tol=1e-10;
+%latencies evaluated at coderate
+WM.Sim.FEC.delay_coderate = WM.Sim.FEC.Time_delay/WM.Sim.SampleTimes.Tcoded;
+WM.Sim.FEC.delay_coderate =check_integer(WM,'WM.Sim.FEC.delay_coderate','tolerance',tol,'warning');
+
+WM.Sim.Tx_chain.delay_coderate=WM.Sim.Tx_chain.Time_delay/WM.Sim.SampleTimes.Tcoded;
+WM.Sim.Tx_chain.delay_coderate=check_integer(WM,'WM.Sim.Tx_chain.delay_coderate','tolerance',tol,'warning');
+
+WM.Sim.Rx_chain.delay_coderate=WM.Sim.Rx_chain.Time_delay/WM.Sim.SampleTimes.Tcoded;
+WM.Sim.Rx_chain.delay_coderate=check_integer(WM,'WM.Sim.Rx_chain.delay_coderate','tolerance',tol,'warning');
+
+WM.Sim.Fec_decod_delay_comp.delay_coderate=WM.Sim.Fec_decod_delay_comp.Time_delay/WM.Sim.SampleTimes.Tcoded;
+WM.Sim.Fec_decod_delay_comp.delay_coderate=check_integer(WM,'WM.Sim.Fec_decod_delay_comp.delay_coderate','tolerance',tol,'warning');
+
+WM.Sim.FEC_decod.delay_coderate=WM.Sim.FEC_decod.Time_delay/WM.Sim.SampleTimes.Tcoded;
+WM.Sim.FEC_decod.delay_coderate=check_integer(WM,'WM.Sim.FEC_decod.delay_coderate','tolerance',tol,'warning');
+
+WM.Sim.addictional_latency_coderate=1;
+%latencies evaluated at sourcerate
+WM.Sim.FEC.delay_sourcerate = WM.Sim.FEC.Time_delay/WM.Sim.SampleTimes.Tsource;
+% check_integer(WM,'WM.Sim.FEC.delay_sourcerate','exact',0,'warning');
+
+WM.Sim.Tx_chain.delay_sourcerate=WM.Sim.Tx_chain.Time_delay/WM.Sim.SampleTimes.Tsource;
+% check_integer(WM,'WM.Sim.Tx_chain.delay_sourcerate','exact',0,'warning');
+
+WM.Sim.Rx_chain.delay_sourcerate=WM.Sim.Rx_chain.Time_delay/WM.Sim.SampleTimes.Tsource;
+% check_integer(WM,'WM.Sim.Rx_chain.delay_sourcerate','exact',0,'warning');
+
+WM.Sim.Fec_decod_delay_comp.delay_sourcerate=WM.Sim.Fec_decod_delay_comp.Time_delay/WM.Sim.SampleTimes.Tsource;
+% check_integer(WM,'WM.Sim.Fec_decod_delay_comp.delay_sourcerate','exact',0,'warning');
+
+WM.Sim.FEC_decod.delay_sourcerate=WM.Sim.FEC_decod.Time_delay/WM.Sim.SampleTimes.Tsource;
+% check_integer(WM,'WM.Sim.FEC_decod.delay_sourcerate','exact',0,'warning');
+WM.Sim.addictional_latency_sourcerate=WM.Sim.addictional_latency_coderate*WM.Sim.FEC_ratio;
+
+
+if (WM.Sim.Fec_decod_delay_comp.delay_coderate==0)
   type='bypass';
     subsystem = 'WM_Sim/FEC_decod_delay_comp';
     block_name = 'Delay';
@@ -548,7 +618,7 @@ else
     subsystem = 'WM_Sim/FEC_decod_delay_comp';
     block_name = 'Delay';
     block_params.name_str={'DelayLength','InputProcessing'};
-    block_params.val_str={num2str(WM.Sim.decoder_data_align),'Columns as channels (frame based)'};
+    block_params.val_str={num2str(WM.Sim.Fec_decod_delay_comp.delay_coderate),'Columns as channels (frame based)'};
     block_params.n_params=length(block_params.name_str);
     inport_name='inp_i';
     oport_name='out_o';
@@ -558,22 +628,30 @@ else
 end
 
 
-if WM.Sim.Frame_len==1
-   WM.Sim.Tx_delay_eq_coderate = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
-    WM.Sim.Tx_delay_eq = WM.Sim.Tx_delay_eq_coderate*WM.Sim.FEC_ratio+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
-else
-    
-    delay_temp = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+decoder_codeword_alignment_latency_coderate;
-    WM.Sim.Tx_delay_eq_coderate =delay_temp +WM.Sim.Frame_len;
-    WM.Sim.Tx_delay_eq =(delay_temp*WM.Sim.FEC_ratio)+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
-       
-end
+ if WM.Sim.Frame_len==1
+%    WM.Sim.Tx_delay_eq_coderate = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+WM.Sim.decoder_data_align;
+%     WM.Sim.Tx_delay_eq = WM.Sim.Tx_delay_eq_coderate*WM.Sim.FEC_ratio+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);
+    WM.Sim.Tx_delay_eq_coderate = WM.Sim.addictional_latency_coderate+WM.Sim.Tx_chain.delay_coderate+WM.Sim.Rx_chain.delay_coderate+WM.Sim.Fec_decod_delay_comp.delay_coderate;
+    WM.Sim.Tx_delay_eq = WM.Sim.addictional_latency_sourcerate+WM.Sim.FEC.delay_sourcerate+WM.Sim.Tx_chain.delay_sourcerate+WM.Sim.Rx_chain.delay_sourcerate+WM.Sim.Fec_decod_delay_comp.delay_sourcerate+WM.Sim.FEC_decod.delay_sourcerate;
+ else
+%     
+%      delay_temp = addictional_latency_coderate+tx_filt_latency_coderate+rx_filt_latency_coderate+WM.Sim.decoder_data_align;
+% %     WM.Sim.Tx_delay_eq_coderate =delay_temp +WM.Sim.Frame_len;
+%      WM.Sim.Tx_delay_eqold =(delay_temp*WM.Sim.FEC_ratio)+fix(WM.Sim.Frame_len/WM.Sim.Encoder.SF)+ WM.Sim.FEC.delay+ WM.Sim.FEC_decod.delay;%+WM.Sim.Decoder.Bandpass.desired_latency/(WM.Sim.Encoder.Oversampling_factor*WM.Sim.Encoder.SF);%+WM.Sim.Decoder.Lowpass.Delay/(WM.Sim.SampleTimes.Tsource/WM.Sim.SampleTimes.Tspreader);  
+    WM.Sim.Tx_delay_eq_coderate = WM.Sim.Frame_len+WM.Sim.addictional_latency_coderate+WM.Sim.Tx_chain.delay_coderate+WM.Sim.Rx_chain.delay_coderate+WM.Sim.Fec_decod_delay_comp.delay_coderate;
+
+        WM.Sim.Tx_delay_eq =WM.Sim.Frame_len*WM.Sim.FEC_ratio+WM.Sim.addictional_latency_sourcerate+WM.Sim.FEC.delay_sourcerate+WM.Sim.Tx_chain.delay_sourcerate+WM.Sim.Rx_chain.delay_sourcerate+WM.Sim.Fec_decod_delay_comp.delay_sourcerate+WM.Sim.FEC_decod.delay_sourcerate;  
+
+  end
 
 
-if ( mod(WM.Sim.Tx_delay_eq,1) ~=0)
-    
-   error(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',WM.Sim.Tx_delay_eq);
-end
+WM.Sim.Tx_delay_eq_coderate=check_integer(WM,'WM.Sim.Tx_delay_eq_coderate','tolerance',tol,'error');
+WM.Sim.Tx_delay_eq=check_integer(WM,'WM.Sim.Tx_delay_eq','tolerance',tol,'error');
+
+% if ( mod(WM.Sim.Tx_delay_eq,1) ~=0)
+%     
+%    warning(' tx_filt_latency %f is a not integer and BER compensation cannot be done easily\n comment the line if you wanna run the sim without exact BER check',WM.Sim.Tx_delay_eq);
+% end
 
 
 close_system('WM_Sim',1);

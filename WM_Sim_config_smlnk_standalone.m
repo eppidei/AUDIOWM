@@ -6,20 +6,20 @@ clear all;close all;clc
 matlab_sim=false;
 
 %%%%SIM PARAMS
-fec                         = 'on';
+fec                         = 'off';
 fec_k                   = 7;%9;%5;
 fec_n                   = 63;%255;%15;
 
 Approx_fec_byte_rate            = 10;%coded effective to bedivided by fec ratio
 fprintf('*********Approximative char rate at source is %f\n', Approx_fec_byte_rate*fec_k/fec_n);
-Time_length                 = 40;
+Time_length                 = 6;
 Carrier_Freq                = 500 ;
 hopping_approx_frequency    = 200;
 hopping                     = 'off';
 suppression_filter          = 'off';
 supp_filt_order             = 8;
 Eb_N0_dB                    = 20;
-Frame_len                   = 2;
+Frame_len                   = 4;
 Tx_approx_BW                = 9e3;
 
 
